@@ -1,0 +1,7 @@
+numpy
+tqdm
+biopython
+networkx
+torch
+torch_geometric
+matplotlib
