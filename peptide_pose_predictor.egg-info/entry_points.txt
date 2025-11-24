@@ -1,0 +1,2 @@
+[console_scripts]
+ppp = predict:main

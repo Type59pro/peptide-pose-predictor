@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: peptide-pose-predictor
+Version: 1.0.0
+Summary: Peptide Pose Predictor using EGNN
+Requires-Dist: numpy
+Requires-Dist: biopython
+Requires-Dist: networkx
+Requires-Dist: torch
+Requires-Dist: torch_geometric
+Requires-Dist: tqdm
+Requires-Dist: pandas
+Dynamic: requires-dist
+Dynamic: summary
