@@ -4,7 +4,8 @@ setup(
     name='peptide-pose-predictor',
     version='1.0.0',
     description='Peptide Pose Predictor using EGNN',
-    py_modules=['predict', 'build_graph', 'inference', 'training'],
+    packages=['peptide_pose_predictor'],
+    package_data={'peptide_pose_predictor': ['best_model_egnn.pth']},
     install_requires=[
         'numpy',
         'biopython',
@@ -16,7 +17,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'ppp=predict:main',
+            'ppp=peptide_pose_predictor.predict:main',
         ],
     },
 )

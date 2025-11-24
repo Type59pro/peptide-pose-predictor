@@ -1,4 +1,1 @@
-build_graph
-inference
-predict
-training
+peptide_pose_predictor

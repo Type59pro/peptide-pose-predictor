@@ -1,2 +1,2 @@
 [console_scripts]
-ppp = predict:main
+ppp = peptide_pose_predictor.predict:main

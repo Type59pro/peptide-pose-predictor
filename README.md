@@ -34,8 +34,8 @@ ppp --prot examples/protein.pdb --pep examples/peptide.pdb
 
 ## Files
 
-- `predict.py`: The main entry point for the CLI.
-- `build_graph.py`: Logic for converting PDB files to graphs.
-- `inference.py`: Inference logic and model definition.
-- `training.py`: Training script.
-- `best_model_egnn.pth`: Pre-trained model weights.
+- `peptide_pose_predictor/predict.py`: The main entry point for the CLI.
+- `peptide_pose_predictor/build_graph.py`: Logic for converting PDB files to graphs.
+- `peptide_pose_predictor/inference.py`: Inference logic and model definition.
+- `peptide_pose_predictor/training.py`: Training script.
+- `peptide_pose_predictor/best_model_egnn.pth`: Pre-trained model weights.

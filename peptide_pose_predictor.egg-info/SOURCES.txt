@@ -1,9 +1,11 @@
 README.md
-build_graph.py
-inference.py
-predict.py
 setup.py
-training.py
+peptide_pose_predictor/__init__.py
+peptide_pose_predictor/best_model_egnn.pth
+peptide_pose_predictor/build_graph.py
+peptide_pose_predictor/inference.py
+peptide_pose_predictor/predict.py
+peptide_pose_predictor/training.py
 peptide_pose_predictor.egg-info/PKG-INFO
 peptide_pose_predictor.egg-info/SOURCES.txt
 peptide_pose_predictor.egg-info/dependency_links.txt
