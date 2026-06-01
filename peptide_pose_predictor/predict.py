@@ -9,12 +9,12 @@ warnings.filterwarnings("ignore")
 
 try:
     from .build_graph import build_graph, convert_nx_to_pyg
-    from .inference import EGNNModel, DEVICE, HIDDEN_DIM, NUM_LAYERS
+    from .inference import DEVICE, create_model_from_checkpoint
 except ImportError:
     # Fallback for when running directly without installation or path issues
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     from build_graph import build_graph, convert_nx_to_pyg
-    from inference import EGNNModel, DEVICE, HIDDEN_DIM, NUM_LAYERS
+    from inference import DEVICE, create_model_from_checkpoint
 
 def main():
     parser = argparse.ArgumentParser(description="Peptide Pose Predictor")
@@ -66,15 +66,9 @@ def main():
     node_dim = data.x.size(1)
     edge_dim = data.edge_attr.size(1) if data.edge_attr is not None else 0
     
-    model = EGNNModel(
-        node_dim=node_dim, 
-        edge_dim=edge_dim, 
-        num_layers=NUM_LAYERS, 
-        hidden_dim=HIDDEN_DIM
-    ).to(DEVICE)
-    
     try:
         ckpt = torch.load(args.model, map_location=DEVICE)
+        model = create_model_from_checkpoint(ckpt, node_dim, edge_dim).to(DEVICE)
         model.load_state_dict(ckpt["model"])
         model.eval()
     except Exception as e:

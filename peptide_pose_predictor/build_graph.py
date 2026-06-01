@@ -120,8 +120,16 @@ def combine_structures(protein_structure, peptide_structure):
                 new_residue = Residue.Residue(residue.id, residue.resname, residue.segid)
                 # Add atoms to new residue
                 for atom in residue:
-                    new_atom = Atom.Atom(atom.name, atom.coord, atom.occupancy, atom.bfactor,
-                                         atom.fullname, atom.altloc, atom.element)  # Remove `atom.chain`
+                    new_atom = Atom.Atom(
+                        atom.get_name(),
+                        atom.get_coord().copy(),
+                        atom.get_bfactor(),
+                        atom.get_occupancy(),
+                        atom.get_altloc(),
+                        atom.get_fullname(),
+                        atom.get_serial_number(),
+                        element=atom.element,
+                    )
                     new_residue.add(new_atom)  # Add atom to new residue
                 new_chain.add(new_residue)  # Add new residue to new chain
             combined_model.add(new_chain)  # Add new chain to model
@@ -133,8 +141,16 @@ def combine_structures(protein_structure, peptide_structure):
             for residue in chain:
                 new_residue = Residue.Residue(residue.id, residue.resname, residue.segid)
                 for atom in residue:
-                    new_atom = Atom.Atom(atom.name, atom.coord, atom.occupancy, atom.bfactor,
-                                         atom.fullname, atom.altloc, atom.element)  # Also remove `atom.chain`
+                    new_atom = Atom.Atom(
+                        atom.get_name(),
+                        atom.get_coord().copy(),
+                        atom.get_bfactor(),
+                        atom.get_occupancy(),
+                        atom.get_altloc(),
+                        atom.get_fullname(),
+                        atom.get_serial_number(),
+                        element=atom.element,
+                    )
                     new_residue.add(new_atom)  # Add atom to new residue
                 new_chain.add(new_residue)  # Add new residue to new chain
             combined_model.add(new_chain)  # Add new chain to model
@@ -182,19 +198,16 @@ def build_graph(input_pdb, input_peptide):
         key = (residue_name, residue_id, chain_id, atom.get_id())
         peptide_sasas[key] = sasas.get(key, (0.0, None))[0]
     
-    protein_pocket = set()
     distance_threshold = 10.0
     distance_threshold_squared = distance_threshold ** 2
 
     diff = peptide_coords[:, np.newaxis, :] - protein_coords[np.newaxis, :, :]
     dist_sq = np.sum(diff ** 2, axis=2)
-    close_pairs = np.where(dist_sq < distance_threshold_squared)
-    for protein_idx in close_pairs[1]:
-        atom = protein_atoms[protein_idx]
-        protein_pocket.add(atom)
+    pocket_mask = np.any(dist_sq < distance_threshold_squared, axis=0)
     
     pocket_atoms = []
-    for atom in protein_pocket:
+    for protein_idx in np.flatnonzero(pocket_mask):
+        atom = protein_atoms[protein_idx]
         residue = atom.get_parent()
         residue_name = residue.get_resname()
         residue_id = residue.get_id()[1]
@@ -664,7 +677,7 @@ def convert_nx_to_pyg(nx_graph, rmsd_list):
     node_mapping = {node: idx for idx, node in enumerate(nx_graph.nodes())}
     node_features = []
     for node in nx_graph.nodes(data=True):
-        feature = node[1].get('feature', [0] * 40)
+        feature = node[1].get('feature', [0] * 44)
         pos = node[1].get('pos', [0.0, 0.0, 0.0]) 
         combine_features = feature[:]
         combine_features.extend(pos)
@@ -673,15 +686,22 @@ def convert_nx_to_pyg(nx_graph, rmsd_list):
     x = torch.tensor(node_features, dtype=torch.float)
 
     # Get edge info and build edge_index
-    edges = list(nx_graph.edges())
-    edge_index = torch.tensor([[node_mapping[u], node_mapping[v]] for u, v in edges], dtype=torch.long).t()
-
-    # Get edge features
+    edges = list(nx_graph.edges(data=True))
+    edge_pairs = []
     edge_features = []
-    for edge in nx_graph.edges(data=True):
-        edge_feature = edge[2].get('feature', [0] * 44)  # Default edge feature is 44 elements
+    for u, v, attrs in edges:
+        edge_feature = attrs.get('feature', [0] * 9)
+        edge_pairs.append([node_mapping[u], node_mapping[v]])
+        edge_features.append(edge_feature)
+        edge_pairs.append([node_mapping[v], node_mapping[u]])
         edge_features.append(edge_feature)
 
+    if edge_pairs:
+        edge_index = torch.tensor(edge_pairs, dtype=torch.long).t().contiguous()
+    else:
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+
+    # Get edge features
     edge_attr = torch.tensor(edge_features, dtype=torch.float) if edge_features else None
 
     # Convert target values to tensor

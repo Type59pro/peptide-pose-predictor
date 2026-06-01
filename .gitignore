@@ -1,0 +1,33 @@
+# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+
+# Local inference/test inputs
+cases/
+
+# Training datasets and generated graph caches
+ppp_training_set/
+ppp_training_set.zip
+ppp_training_graphs/
+experiments_size_data/
+peptide_pose_predictor/prepare_training_data.py
+
+# Training and architecture-search outputs
+experiments_arch/
+experiments_shape/
+experiments_size/
+best_model_egnn_*.pth
+debug_*.json
+debug_*.csv
+debug_*.pth
+debug_*.txt
+tri_smoke*.json
+tri_smoke*.csv
+tri_smoke*.pth
+tri_smoke*.txt
+loss_history_*.json
+metrics_*.csv
+results_*.txt

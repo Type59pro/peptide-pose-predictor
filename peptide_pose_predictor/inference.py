@@ -19,18 +19,18 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 from torch_geometric.nn import MessagePassing
 
 class EGNNLayer(MessagePassing):
-    def __init__(self, in_dim, edge_dim, hidden_dim):
+    def __init__(self, in_dim, edge_dim, out_dim):
         super().__init__(aggr='add', node_dim=0)
         self.edge_mlp = nn.Sequential(
-            nn.Linear(2 * in_dim + edge_dim + 1, hidden_dim),
+            nn.Linear(2 * in_dim + edge_dim + 1, out_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(out_dim, out_dim),
             nn.ReLU()
         )
         self.node_mlp = nn.Sequential(
-            nn.Linear(in_dim + hidden_dim, hidden_dim),
+            nn.Linear(in_dim + out_dim, out_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, in_dim)
+            nn.Linear(out_dim, out_dim)
         )
 
     def forward(self, x, pos, edge_index, edge_attr):
@@ -49,19 +49,53 @@ class EGNNLayer(MessagePassing):
 
 # ───────────── Model Definition ──────────────
 class EGNNModel(nn.Module):
-    def __init__(self, node_dim, edge_dim, num_layers, hidden_dim, out_dim=1, drop=0.1):
+    def __init__(
+        self,
+        node_dim,
+        edge_dim,
+        num_layers,
+        hidden_dim,
+        out_dim=1,
+        drop=0.1,
+        pooling="mean_max_add",
+        residual=False,
+        layer_norm=False,
+        hidden_dims=None,
+    ):
         super().__init__()
+        self.pooling = pooling
+        self.residual = residual
+        if hidden_dims is None:
+            hidden_dims = [hidden_dim] * num_layers
+        if len(hidden_dims) != num_layers:
+            raise ValueError("hidden_dims length must match num_layers")
+        self.hidden_dims = hidden_dims
         self.node_encoder = nn.Sequential(
-            nn.Linear(node_dim, hidden_dim),
+            nn.Linear(node_dim, hidden_dims[0]),
             nn.ReLU(),
             nn.Dropout(drop)
         )
+        layer_in_dims = [hidden_dims[0]] + hidden_dims[:-1]
         self.egnn_layers = nn.ModuleList([
-            EGNNLayer(hidden_dim, edge_dim if edge_dim > 0 else 0, hidden_dim)
-            for _ in range(num_layers)
+            EGNNLayer(in_dim, edge_dim if edge_dim > 0 else 0, out_dim)
+            for in_dim, out_dim in zip(layer_in_dims, hidden_dims)
         ])
+        self.residual_projections = nn.ModuleList([
+            nn.Identity() if in_dim == out_dim else nn.Linear(in_dim, out_dim)
+            for in_dim, out_dim in zip(layer_in_dims, hidden_dims)
+        ])
+        self.layer_norms = nn.ModuleList([
+            nn.LayerNorm(dim)
+            for dim in hidden_dims
+        ]) if layer_norm else None
+        final_dim = hidden_dims[-1]
+        pooling_dim = {
+            "mean_max_add": final_dim * 3,
+            "mean_max": final_dim * 2,
+            "mean": final_dim,
+        }[pooling]
         self.readout = nn.Sequential(
-            nn.Linear(hidden_dim * 3, hidden_dim),
+            nn.Linear(pooling_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(drop),
             nn.Linear(hidden_dim, hidden_dim // 2),
@@ -72,14 +106,41 @@ class EGNNModel(nn.Module):
 
     def forward(self, x, pos, edge_index, edge_attr, batch):
         h = self.node_encoder(x)
-        for layer in self.egnn_layers:
-            h = layer(h, pos, edge_index, edge_attr)
-        pooled = torch.cat([
-            global_mean_pool(h, batch),
-            global_max_pool(h, batch),
-            global_add_pool(h, batch)
-        ], dim=-1)
+        for idx, layer in enumerate(self.egnn_layers):
+            h_next = layer(h, pos, edge_index, edge_attr)
+            h = self.residual_projections[idx](h) + h_next if self.residual else h_next
+            if self.layer_norms is not None:
+                h = self.layer_norms[idx](h)
+
+        if self.pooling == "mean_max_add":
+            pooled = torch.cat([
+                global_mean_pool(h, batch),
+                global_max_pool(h, batch),
+                global_add_pool(h, batch)
+            ], dim=-1)
+        elif self.pooling == "mean_max":
+            pooled = torch.cat([
+                global_mean_pool(h, batch),
+                global_max_pool(h, batch),
+            ], dim=-1)
+        else:
+            pooled = global_mean_pool(h, batch)
         return self.readout(pooled)
+
+
+def create_model_from_checkpoint(ckpt, node_dim, edge_dim):
+    config = ckpt.get("model_config", {})
+    return EGNNModel(
+        node_dim=node_dim,
+        edge_dim=edge_dim,
+        num_layers=config.get("num_layers", NUM_LAYERS),
+        hidden_dim=config.get("hidden_dim", HIDDEN_DIM),
+        drop=config.get("dropout", 0.1),
+        pooling=config.get("pooling", "mean_max_add"),
+        residual=config.get("residual", False),
+        layer_norm=config.get("layer_norm", False),
+        hidden_dims=config.get("hidden_dims"),
+    )
 
 
 # ───────────── Dataset ──────────────
@@ -136,15 +197,9 @@ def inference(model_path, data_path, batch_size, output_file):
         print(f"Error: Model file not found at {model_path}")
         return
         
-    model = EGNNModel(
-        node_dim=dataset.node_dim, 
-        edge_dim=dataset.edge_dim, 
-        num_layers=NUM_LAYERS, 
-        hidden_dim=HIDDEN_DIM
-    ).to(DEVICE)
-    
     try:
         ckpt = torch.load(model_path, map_location=DEVICE)
+        model = create_model_from_checkpoint(ckpt, dataset.node_dim, dataset.edge_dim).to(DEVICE)
         model.load_state_dict(ckpt["model"])
         model.eval()
         print("Model loaded successfully.")
