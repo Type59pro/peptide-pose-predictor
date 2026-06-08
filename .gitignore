@@ -11,7 +11,7 @@ cases/
 # Training datasets and generated graph caches
 ppp_training_set/
 ppp_training_set.zip
-ppp_training_graphs/
+ppp_training_graphs*/
 experiments_size_data/
 peptide_pose_predictor/prepare_training_data.py
 
@@ -19,6 +19,8 @@ peptide_pose_predictor/prepare_training_data.py
 experiments_arch/
 experiments_shape/
 experiments_size/
+experiments_regularization/
+group_smoke_*
 best_model_egnn_*.pth
 debug_*.json
 debug_*.csv

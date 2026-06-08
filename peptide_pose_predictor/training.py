@@ -7,6 +7,7 @@ import json
 import time
 import warnings
 from pathlib import Path
+import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -196,14 +197,17 @@ class PtDataset(Dataset):
                 self.shard_paths = [self.pt_path / name for name in metadata["shards"]]
                 total_graphs = metadata.get("total_graphs")
                 shard_size = metadata.get("shard_size")
+                self.graph_metadata = metadata.get("graph_metadata")
             else:
                 self.shard_paths = sorted(self.pt_path.glob("*.pt"))
                 total_graphs = None
                 shard_size = None
+                self.graph_metadata = None
         else:
             self.shard_paths = [self.pt_path]
             total_graphs = None
             shard_size = None
+            self.graph_metadata = None
 
         if not self.shard_paths:
             raise FileNotFoundError(f"No .pt shards found in {self.pt_path}")
@@ -225,6 +229,8 @@ class PtDataset(Dataset):
         for shard_length in self.shard_lengths:
             total += shard_length
             self.cumulative_lengths.append(total)
+        if self.graph_metadata is not None and len(self.graph_metadata) != self.cumulative_lengths[-1]:
+            raise ValueError("graph_metadata length does not match dataset length")
 
         if first_graph is None:
             raise ValueError(f"No graphs found in {self.pt_path}")
@@ -337,6 +343,34 @@ def parse_hidden_dims(hidden_dims):
     return dims
 
 
+def make_group_splits(graph_metadata, train_fraction, val_fraction, seed):
+    groups = sorted({item["system_id"] for item in graph_metadata})
+    rng = random.Random(seed)
+    rng.shuffle(groups)
+
+    n_groups = len(groups)
+    n_val = max(1, int(val_fraction * n_groups))
+    n_test = max(1, int((1.0 - train_fraction - val_fraction) * n_groups))
+    n_train = n_groups - n_val - n_test
+    if n_train <= 0:
+        raise ValueError("Not enough groups for train/val/test split")
+
+    train_groups = set(groups[:n_train])
+    val_groups = set(groups[n_train:n_train + n_val])
+    test_groups = set(groups[n_train + n_val:])
+
+    train_idx, val_idx, test_idx = [], [], []
+    for idx, item in enumerate(graph_metadata):
+        system_id = item["system_id"]
+        if system_id in train_groups:
+            train_idx.append(idx)
+        elif system_id in val_groups:
+            val_idx.append(idx)
+        else:
+            test_idx.append(idx)
+    return train_idx, val_idx, test_idx, len(train_groups), len(val_groups), len(test_groups)
+
+
 # ───────────── Main Process ──────────────
 def main():
     parser = argparse.ArgumentParser(description="Train Peptide Pose Predictor EGNN model.")
@@ -366,6 +400,12 @@ def main():
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument(
+        "--split-mode",
+        choices=["auto", "sequential", "random", "group"],
+        default="auto",
+        help="Use group when graph metadata with system_id is available; otherwise sequential for sharded data.",
+    )
     parser.add_argument(
         "--output-init",
         type=str,
@@ -414,7 +454,28 @@ def main():
     if n_train <= 0:
         raise ValueError("Dataset is too small for the configured split.")
 
-    if ds.is_sharded:
+    split_mode = args.split_mode
+    if split_mode == "auto":
+        split_mode = "group" if ds.graph_metadata is not None else ("sequential" if ds.is_sharded else "random")
+
+    if split_mode == "group":
+        if ds.graph_metadata is None:
+            raise ValueError("Group split requires graph_metadata in dataset metadata.json")
+        train_idx, val_idx, test_idx, n_train_groups, n_val_groups, n_test_groups = make_group_splits(
+            ds.graph_metadata,
+            train_fraction=0.8,
+            val_fraction=0.1,
+            seed=args.seed,
+        )
+        tr_ds = Subset(ds, train_idx)
+        va_ds = Subset(ds, val_idx)
+        te_ds = Subset(ds, test_idx)
+        n_train, n_val, n_test = len(train_idx), len(val_idx), len(test_idx)
+        print(
+            f"Group split: train_groups={n_train_groups} | val_groups={n_val_groups} | test_groups={n_test_groups}",
+            flush=True,
+        )
+    elif split_mode == "sequential":
         # Shards are already produced from parallel jobs in a mixed order. Keep access contiguous
         # so each shard is loaded once instead of repeatedly reloading large shard files.
         tr_ds = Subset(ds, range(0, n_train))
@@ -465,6 +526,7 @@ def main():
         "pooling": args.pooling,
         "residual": args.residual,
         "layer_norm": args.layer_norm,
+        "split_mode": split_mode,
     }
 
     start_epoch = 1
